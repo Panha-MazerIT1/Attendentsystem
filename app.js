@@ -54,11 +54,12 @@ const DEFAULT_SETTINGS = {
 };
 
 const S = {
-  sb: null, user: null, settings: clone(DEFAULT_SETTINGS),
+  sb: null, user: null, role: 'owner', settings: clone(DEFAULT_SETTINGS),
   students: [], weeks: [], week: null, abs: {},
   tab: 'record', day: 0, per: { sess: 'am', i: 0 },
   rep: 'day', month: '', ttDay: 0, ttDraft: null, tok: 0, pending: 0
 };
+const isViewer = () => S.role === 'viewer';
 const activeStudents = () => S.students.filter(s => s.active);
 
 async function q(p) { const { data, error } = await p; if (error) throw error; return data; }
@@ -73,6 +74,16 @@ function slotsOfDay(tt, d) {
   return out;
 }
 
+async function loadProfile() {
+  // កំណត់តួនាទី (owner/viewer)។ បើគ្មានជួរ profiles ទេ (schema.sql ចាស់, ឬ owner ដែលមិនទាន់ backfill)
+  // ចាត់ទុកជា owner ដូចដើម ដើម្បីកុំឲ្យខូចគណនីចាស់។
+  try {
+    const { data, error } = await S.sb.from('profiles').select('role,owner_id').eq('user_id', S.user.id).maybeSingle();
+    if (error) throw error;
+    S.role = (data && data.role === 'viewer') ? 'viewer' : 'owner';
+  } catch (e) { S.role = 'owner'; }
+  if (isViewer()) S.tab = 'reports';
+}
 async function loadCore() {
   const [st, students, weeks] = await Promise.all([
     q(S.sb.from('settings').select('*')),
@@ -80,7 +91,7 @@ async function loadCore() {
     q(S.sb.from('weeks').select('*').order('start_date'))
   ]);
   if (st.length) S.settings = Object.assign(clone(DEFAULT_SETTINGS), st[0].data || {});
-  else await q(S.sb.from('settings').insert({ data: S.settings }));
+  else if (!isViewer()) await q(S.sb.from('settings').insert({ data: S.settings }));
   S.students = students;
   S.weeks = weeks;
 }
@@ -160,7 +171,9 @@ const ICONS = {
   timetable: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'
 };
-const TABS = [['record', 'កត់វត្តមាន'], ['reports', 'របាយការណ៍'], ['students', 'សិស្ស'], ['timetable', 'កាលវិភាគ'], ['settings', 'ការកំណត់']];
+const TABS_OWNER = [['record', 'កត់វត្តមាន'], ['reports', 'របាយការណ៍'], ['students', 'សិស្ស'], ['timetable', 'កាលវិភាគ'], ['settings', 'ការកំណត់']];
+const TABS_VIEWER = [['reports', 'របាយការណ៍']];
+const TABS = () => isViewer() ? TABS_VIEWER : TABS_OWNER;
 
 function showLogin(msg) {
   const missing = !CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY || /YOUR-/.test(CFG.SUPABASE_URL + CFG.SUPABASE_ANON_KEY);
@@ -174,23 +187,26 @@ function showLogin(msg) {
 }
 
 function renderShell() {
+  if (isViewer()) S.tab = 'reports';
   const weeks = S.weeks.slice().sort((a, b) => b.start_date.localeCompare(a.start_date));
+  const tabs = TABS();
   app.innerHTML = `
   <header class="top">
-    <div class="brand"><b>វត្តមាន</b><small>${esc(S.settings.short_title || '')}</small></div>
+    <div class="brand"><b>វត្តមាន</b><small>${esc(S.settings.short_title || '')}${isViewer() ? ' · អ្នកមើល' : ''}</small></div>
     <div class="weekpick">
       <select id="weekSel" aria-label="ជ្រើសរើសសប្ដាហ៍">${weeks.map(w => `<option value="${w.id}" ${S.week && w.id === S.week.id ? 'selected' : ''}>${weekLabel(w)}</option>`).join('') || '<option>—</option>'}</select>
-      <button class="icon" data-act="newWeek" aria-label="បន្ថែមសប្ដាហ៍ថ្មី">+</button>
+      ${isViewer() ? '<button class="icon" data-act="logout" aria-label="ចាកចេញ" title="ចាកចេញ">⎋</button>' : '<button class="icon" data-act="newWeek" aria-label="បន្ថែមសប្ដាហ៍ថ្មី">+</button>'}
     </div>
   </header>
   <div id="saving"></div>
   <main id="view"></main>
-  <nav class="tabs" aria-label="ម៉ឺនុយ">${TABS.map(([k, l]) => `<button data-act="tab" data-v="${k}" class="${S.tab === k ? 'on' : ''}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${l}</button>`).join('')}</nav>
+  <nav class="tabs" style="grid-template-columns:repeat(${tabs.length},1fr)" aria-label="ម៉ឺនុយ">${tabs.map(([k, l]) => `<button data-act="tab" data-v="${k}" class="${S.tab === k ? 'on' : ''}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${l}</button>`).join('')}</nav>
   <div id="toast" role="status" aria-live="polite"></div>`;
   renderView();
 }
 
 async function renderView() {
+  if (isViewer() && S.tab !== 'reports') S.tab = 'reports';
   const v = $('#view'); if (!v) return;
   $$('.tabs button').forEach(b => { const on = b.dataset.v === S.tab; b.classList.toggle('on', on); on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'); });
   const tok = ++S.tok;
@@ -674,15 +690,20 @@ function buildMonthWorkbook(ws, month) {
 function download(wb, name) { XLSX.writeFile(wb, name); }
 
 /* ---------- 6. ចាប់ផ្តើម ---------- */
+// អ្នកមើល (viewer) អាចប្រើបានតែសកម្មភាពអានទាំងនេះ · សកម្មភាពផ្សេងទៀត (កែ/បន្ថែម/លុប) ត្រូវបានទប់ស្កាត់
+// នៅត្រង់នេះជាចំណុចតែមួយ បន្ថែមលើ RLS ខាង Supabase ដែលជាស្រទាប់ការពារពិតប្រាកដ។
+const VIEWER_SAFE_ACTS = new Set(['tab', 'day', 'rep', 'closeDlg', 'exportWeek', 'exportMonth', 'logout']);
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
-  const f = ACTS[el.dataset.act]; if (f) { e.preventDefault(); Promise.resolve(f(el, e)).catch(err => toast(errText(err), 'err')); }
+  const act = el.dataset.act;
+  if (isViewer() && !VIEWER_SAFE_ACTS.has(act)) { e.preventDefault(); toast('គណនីអ្នកមើល អាចមើលរបាយការណ៍បានតែប៉ុណ្ណោះ', 'err'); return; }
+  const f = ACTS[act]; if (f) { e.preventDefault(); Promise.resolve(f(el, e)).catch(err => toast(errText(err), 'err')); }
 });
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'weekSel') { const w = S.weeks.find(x => x.id === t.value); if (w) { pickWeek(w); renderView(); } }
   else if (t.id === 'monthSel') { S.month = t.value; renderView(); }
-  else if (t.id === 'fileIn' && t.files[0]) { onFile(t.files[0]); t.value = ''; }
+  else if (t.id === 'fileIn' && t.files[0]) { if (isViewer()) { t.value = ''; return; } onFile(t.files[0]); t.value = ''; }
 });
 document.addEventListener('submit', async e => {
   if (e.target.id !== 'loginForm') return; e.preventDefault();
@@ -700,6 +721,7 @@ document.addEventListener('submit', async e => {
 async function boot() {
   app.innerHTML = '<p class="boot">កំពុងផ្ទុក…</p>';
   try {
+    await loadProfile();
     await loadCore();
     const sorted = S.weeks.slice().sort((a, b) => a.start_date.localeCompare(b.start_date));
     const cur = mondayOf(todayISO());
