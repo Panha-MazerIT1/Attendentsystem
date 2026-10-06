@@ -29,6 +29,7 @@ const fmtLong = iso => { const d = dateOf(iso); return `${kh(d.getUTCDate())} ${
 const dnum = iso => dateOf(iso).getUTCDate();
 const weekLabel = w => `${kh(dnum(w.start_date))}–${fmtLong(addDays(w.start_date, 4))}`;
 const key = (sid, d, s, i) => `${sid}|${d}|${s}|${i}`;
+const spKey = (sid, d, type) => `${sid}|${d}|${type}`;
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* ---------- 2. ទិន្នន័យ ---------- */
@@ -50,13 +51,20 @@ const DEFAULT_SETTINGS = {
   taker: '',
   morning: 4,
   afternoon: 3,
-  template: DEFAULT_TEMPLATE
+  template: DEFAULT_TEMPLATE,
+  // ម៉ោងពិសេស (ក្រៅកាលវិភាគ) · weekday: 0=ច័ន្ទ … 4=សុក្រ (ប្រចាំសប្ដាហ៍) · null = មិនទៀងទាត់ (បន្ថែមដោយដៃ)
+  specialTypes: [
+    { key: 'flag',    label: 'ម៉ោងគោរពទង់ជាតិ',      weekday: 0 },
+    { key: 'skill',   label: 'ម៉ោងបំណិន',             weekday: null },
+    { key: 'cleanup', label: 'ម៉ោងសម្អាតបរិស្ថាន',     weekday: null },
+    { key: 'library', label: 'ម៉ោងបណ្ណាល័យ',          weekday: null }
+  ]
 };
 
 const S = {
   sb: null, user: null, role: 'owner', settings: clone(DEFAULT_SETTINGS),
-  students: [], weeks: [], week: null, abs: {},
-  tab: 'record', day: 0, per: { sess: 'am', i: 0 },
+  students: [], weeks: [], week: null, abs: {}, specials: {},
+  tab: 'record', day: 0, per: { sess: 'am', i: 0 }, spType: null,
   rep: 'day', month: '', ttDay: 0, ttDraft: null, tok: 0, pending: 0
 };
 const isViewer = () => S.role === 'viewer';
@@ -111,6 +119,35 @@ async function fetchAbs(weekId) {
   return m;
 }
 const ensureAbs = ws => Promise.all(ws.map(w => fetchAbs(w.id)));
+
+async function fetchSpecials(weekId) {
+  if (S.specials[weekId]) return S.specials[weekId];
+  const m = new Map();
+  for (let from = 0; ; from += 1000) {
+    const rows = await q(S.sb.from('special_absences').select('student_id,day,type,status')
+      .eq('week_id', weekId).range(from, from + 999));
+    rows.forEach(r => m.set(spKey(r.student_id, r.day, r.type), r.status));
+    if (rows.length < 1000) break;
+  }
+  S.specials[weekId] = m;
+  return m;
+}
+async function applySpChanges(changes) {
+  const w = S.week, m = await fetchSpecials(w.id);
+  const old = changes.map(c => m.get(spKey(c.sid, c.day, c.type)));
+  changes.forEach(c => { const k = spKey(c.sid, c.day, c.type); c.status == null ? m.delete(k) : m.set(k, c.status); });
+  renderView();
+  busy(1);
+  try {
+    const ups = changes.filter(c => c.status != null).map(c => ({ week_id: w.id, student_id: c.sid, day: c.day, type: c.type, status: c.status }));
+    if (ups.length) await q(S.sb.from('special_absences').upsert(ups, { onConflict: 'week_id,student_id,day,type' }));
+    for (const c of changes.filter(c => c.status == null))
+      await q(S.sb.from('special_absences').delete().eq('week_id', w.id).eq('student_id', c.sid).eq('day', c.day).eq('type', c.type));
+  } catch (e) {
+    changes.forEach((c, n) => { const k = spKey(c.sid, c.day, c.type); old[n] === undefined ? m.delete(k) : m.set(k, old[n]); });
+    renderView(); toast('រក្សាទុកមិនបាន៖ ' + errText(e), 'err');
+  } finally { busy(-1); }
+}
 
 function scheduledSlots(week) {
   const out = [];
@@ -169,9 +206,10 @@ const ICONS = {
   reports: '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
   students: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>',
   timetable: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  specials: '<path d="M12 2.5l2.9 5.88 6.5.94-4.7 4.58 1.1 6.47L12 17.3l-5.8 3.07 1.1-6.47-4.7-4.58 6.5-.94z"/>'
 };
-const TABS_OWNER = [['record', 'កត់វត្តមាន'], ['reports', 'របាយការណ៍'], ['students', 'សិស្ស'], ['timetable', 'កាលវិភាគ'], ['settings', 'ការកំណត់']];
+const TABS_OWNER = [['record', 'កត់វត្តមាន'], ['specials', 'ម៉ោងពិសេស'], ['reports', 'របាយការណ៍'], ['students', 'សិស្ស'], ['timetable', 'កាលវិភាគ'], ['settings', 'ការកំណត់']];
 const TABS_VIEWER = [['reports', 'របាយការណ៍']];
 const TABS = () => isViewer() ? TABS_VIEWER : TABS_OWNER;
 
@@ -210,11 +248,14 @@ async function renderView() {
   const v = $('#view'); if (!v) return;
   $$('.tabs button').forEach(b => { const on = b.dataset.v === S.tab; b.classList.toggle('on', on); on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'); });
   const tok = ++S.tok;
-  if (!S.week && ['record', 'reports', 'timetable'].includes(S.tab)) { v.innerHTML = viewNoWeek(); return; }
+  if (!S.week && ['record', 'specials', 'reports', 'timetable'].includes(S.tab)) { v.innerHTML = viewNoWeek(); return; }
   switch (S.tab) {
     case 'record':
       if (!S.abs[S.week.id]) { v.innerHTML = '<p class="pad muted">កំពុងផ្ទុក…</p>'; await fetchAbs(S.week.id).catch(e => toast(errText(e), 'err')); if (tok !== S.tok) return; }
       v.innerHTML = viewRecord(); break;
+    case 'specials':
+      if (!S.specials[S.week.id]) { v.innerHTML = '<p class="pad muted">កំពុងផ្ទុក…</p>'; await fetchSpecials(S.week.id).catch(e => toast(errText(e), 'err')); if (tok !== S.tok) return; }
+      v.innerHTML = viewSpecials(); break;
     case 'reports': {
       if (S.rep === 'month') {
         const ws = monthWeeks();
@@ -258,6 +299,30 @@ function viewRecord() {
   return `<div class="daybar">${days}</div><div class="chips">${chips}</div>${body}`;
 }
 
+function viewSpecials() {
+  const w = S.week, m = S.specials[w.id] || new Map(), stu = activeStudents(), types = S.settings.specialTypes || [];
+  if (!S.spType || !types.some(t => t.key === S.spType)) S.spType = types[0] ? types[0].key : null;
+  const cnt = type => stu.reduce((a, st) => a + (m.has(spKey(st.id, S.day, type)) ? 1 : 0), 0);
+  const days = DAYS.map((n, d) => `<button class="day ${d === S.day ? 'on' : ''}" data-act="day" data-v="${d}"><span>${n}</span><small>${kh(dnum(addDays(w.start_date, d)))}</small></button>`).join('');
+  const chips = types.map(t => { const c = cnt(t.key); return `<button class="chip ${t.key === S.spType ? 'on' : ''}" data-act="spType" data-k="${t.key}"><b>${esc(t.label)}</b><span>${t.weekday === S.day ? 'ប្រចាំថ្ងៃនេះ' : '—'}</span>${c ? `<i class="bdg">${kh(c)}</i>` : ''}</button>`; }).join('');
+  const curT = types.find(x => x.key === S.spType);
+  let body;
+  if (!types.length) body = '<div class="card"><p class="muted">មិនទាន់កំណត់ប្រភេទម៉ោងពិសេសទេ — កំណត់ក្នុងផ្ទាំង "ការកំណត់"</p></div>';
+  else if (!stu.length) body = '<div class="card"><p class="muted">មិនទាន់មានសិស្ស។ សូមបន្ថែមក្នុងផ្ទាំង "សិស្ស"។</p></div>';
+  else {
+    let p = 0, u = 0;
+    const rows = stu.map((st, n) => {
+      const v = m.get(spKey(st.id, S.day, S.spType)); if (v === 1) p++; else if (v === 0) u++;
+      const cls = v === 1 ? 'perm' : v === 0 ? 'unperm' : 'ok', txt = v === 1 ? 'មានច្បាប់' : v === 0 ? 'អត់ច្បាប់' : '✓ មក';
+      return `<li class="stu"><span class="no">${kh(n + 1)}</span><span class="nm">${esc(st.name)}${st.sex ? `<small>${esc(st.sex)}</small>` : ''}</span><button class="st ${cls}" data-act="spCycle" data-sid="${st.id}" aria-label="${esc(st.name)}៖ ${txt}">${txt}</button></li>`;
+    }).join('');
+    body = `<div class="pcard"><h2>${esc(curT.label)}</h2>
+      <p>${DAYS[S.day]} ${fmtLong(addDays(w.start_date, S.day))} — មក ${kh(stu.length - p - u)} · មានច្បាប់ ${kh(p)} · អត់ច្បាប់ ${kh(u)}</p>
+      <div class="row"><button class="btn small" data-act="spAllPresent">មកទាំងអស់</button></div></div>
+      <ul class="stulist">${rows}</ul>`;
+  }
+  return `<div class="daybar">${days}</div><div class="chips">${chips}</div>${body}`;
+}
 function viewReports(inner) {
   const b = (k, l) => `<button class="${S.rep === k ? 'on' : ''}" data-act="rep" data-v="${k}">${l}</button>`;
   return `<div class="tabs2">${b('day', 'អ្នកឈប់ថ្ងៃ')}${b('week', 'សរុបសប្ដាហ៍')}${b('month', 'សរុបខែ')}</div>${inner}`;
@@ -331,6 +396,11 @@ function viewSettings() {
     <label class="f" for="s-place">ធ្វើនៅ (ទីកន្លែង)</label><input id="s-place" type="text" value="${esc(s.place)}">
     <label class="f" for="s-taker">ឈ្មោះអ្នកស្រង់</label><input id="s-taker" type="text" value="${esc(s.taker)}"></div>
   <div class="card"><h2>ចំនួនម៉ោងក្នុងមួយថ្ងៃ</h2><div class="row"><div class="grow"><label class="f" for="s-am" style="margin-top:0">ពេលព្រឹក</label><input id="s-am" type="number" min="1" max="8" value="${s.morning}"></div><div class="grow"><label class="f" for="s-pm" style="margin-top:0">ពេលរសៀល</label><input id="s-pm" type="number" min="0" max="8" value="${s.afternoon}"></div></div></div>
+  <div class="card"><h2>ម៉ោងពិសេស (ក្រៅកាលវិភាគ)</h2><p class="muted" style="margin:0 0 8px;font-size:.85rem">កត់ត្រាម្នាក់ៗ ✓/មានច្បាប់/អត់ច្បាប់ ដូចផ្ទាំង "កត់វត្តមាន" (ក្នុងផ្ទាំង "ម៉ោងពិសេស")។ ជ្រើស "ថ្ងៃប្រចាំ" បើកើតឡើងដដែលៗរៀងរាល់សប្ដាហ៍ ទុក "គ្មាន" បើមិនទៀងទាត់ — ទោះជ្រើសយ៉ាងណា នៅតែអាចកត់ថ្ងៃផ្សេងបានគ្រប់ពេល។</p>
+    ${(s.specialTypes || []).map((t, i) => `<div class="row" style="margin-bottom:8px">
+      <input class="grow" type="text" data-sp-label="${i}" value="${esc(t.label)}">
+      <select data-sp-day="${i}" style="width:132px"><option value="" ${t.weekday == null ? 'selected' : ''}>គ្មាន (មិនទៀងទាត់)</option>${DAYS.map((n, d) => `<option value="${d}" ${t.weekday === d ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    </div>`).join('')}</div>
   <button class="btn primary" style="width:100%;margin-bottom:12px" data-act="saveSettings">រក្សាទុកការកំណត់</button>
   <div class="card"><h2>គណនី</h2><p class="muted" style="margin:0 0 8px">${esc(S.user && S.user.email || '')}</p><div class="row"><button class="btn" data-act="logout">ចាកចេញ</button><button class="btn danger" data-act="delWeek">លុបសប្ដាហ៍នេះ</button></div></div>`;
 }
@@ -412,6 +482,29 @@ const ACTS = {
     d.close(); if (ch.length) applyChanges(ch); else toast('គ្មានអ្វីត្រូវប្តូរ');
   },
 
+  /* ម៉ោងពិសេស (កត់ម្នាក់ៗ ដូចកត់វត្តមានធម្មតា) */
+  spType: el => { S.spType = el.dataset.k; renderView(); },
+  spCycle: el => {
+    if (!S.spType) return;
+    const type = S.spType, sid = el.dataset.sid;
+    const cur = (S.specials[S.week.id] || new Map()).get(spKey(sid, S.day, type));
+    const next = cur === undefined ? 0 : cur === 0 ? 1 : null;   // មក → អត់ច្បាប់ → មានច្បាប់ → មក
+    applySpChanges([{ sid, day: S.day, type, status: next }]);
+  },
+  spAllPresent: async () => {
+    const type = S.spType; if (!type) return;
+    const m = S.specials[S.week.id], w = S.week;
+    const has = activeStudents().some(st => m.has(spKey(st.id, S.day, type)));
+    if (!has) return toast('ម៉ោងនេះមកទាំងអស់ហើយ');
+    if (!confirm('លុបអវត្តមានទាំងអស់សម្រាប់ម៉ោងនេះ?')) return;
+    const ids = activeStudents().map(st => st.id), old = [];
+    ids.forEach(id => { const k = spKey(id, S.day, type); if (m.has(k)) old.push([k, m.get(k)]); m.delete(k); });
+    renderView(); busy(1);
+    try { await q(S.sb.from('special_absences').delete().eq('week_id', w.id).eq('day', S.day).eq('type', type).in('student_id', ids)); }
+    catch (e) { old.forEach(([k, v]) => m.set(k, v)); renderView(); toast('រក្សាទុកមិនបាន៖ ' + errText(e), 'err'); }
+    finally { busy(-1); }
+  },
+
   /* សប្ដាហ៍ */
   newWeek: () => {
     const last = S.weeks.slice().sort((a, b) => a.start_date.localeCompare(b.start_date)).pop();
@@ -435,7 +528,7 @@ const ACTS = {
     if (!S.week || !confirm(`លុបសប្ដាហ៍ ${weekLabel(S.week)} រួមទាំងវត្តមានទាំងអស់ក្នុងសប្ដាហ៍នេះ? មិនអាចត្រឡប់វិញទេ។`)) return;
     try {
       await q(S.sb.from('weeks').delete().eq('id', S.week.id));
-      S.weeks = S.weeks.filter(w => w.id !== S.week.id); delete S.abs[S.week.id];
+      S.weeks = S.weeks.filter(w => w.id !== S.week.id); delete S.abs[S.week.id]; delete S.specials[S.week.id];
       const last = S.weeks.slice().sort((a, b) => a.start_date.localeCompare(b.start_date)).pop();
       S.week = null; if (last) pickWeek(last); S.tab = 'record'; renderShell(); toast('បានលុប');
     } catch (e) { toast('លុបមិនបាន៖ ' + errText(e), 'err'); }
@@ -496,7 +589,11 @@ const ACTS = {
   saveSettings: async () => {
     const s = S.settings, v = id => $('#' + id).value;
     const am = Math.min(8, Math.max(1, parseInt(v('s-am'), 10) || 4)), pm = Math.min(8, Math.max(0, parseInt(v('s-pm'), 10) || 0));
-    Object.assign(s, { short_title: v('s-short').trim(), header_lines: v('s-head').split('\n').map(x => x.trim()).filter(Boolean), class_title: v('s-class').trim(), month_title: v('s-month').trim(), major: v('s-major').trim(), grid_title: v('s-grid').trim(), place: v('s-place').trim(), taker: v('s-taker').trim(), morning: am, afternoon: pm });
+    const specialTypes = (s.specialTypes || []).map((t, i) => {
+      const lab = $('[data-sp-label="' + i + '"]'), day = $('[data-sp-day="' + i + '"]');
+      return { key: t.key, label: (lab ? lab.value.trim() : '') || t.label, weekday: day && day.value !== '' ? +day.value : null };
+    });
+    Object.assign(s, { short_title: v('s-short').trim(), header_lines: v('s-head').split('\n').map(x => x.trim()).filter(Boolean), class_title: v('s-class').trim(), month_title: v('s-month').trim(), major: v('s-major').trim(), grid_title: v('s-grid').trim(), place: v('s-place').trim(), taker: v('s-taker').trim(), morning: am, afternoon: pm, specialTypes });
     try { await saveSettings(); S.ttDraft = null; renderShell(); toast('បានរក្សាទុកការកំណត់'); } catch (e) { toast('រក្សាទុកមិនបាន៖ ' + errText(e), 'err'); }
   },
   logout: async () => { await S.sb.auth.signOut(); },
@@ -737,7 +834,7 @@ async function init() {
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   try { url = new URL(url).origin; } catch (e) { /* ទុកដដែល */ }
   S.sb = window.supabase.createClient(url, String(CFG.SUPABASE_ANON_KEY).trim());
-  S.sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; S.abs = {}; showLogin(); } });
+  S.sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; S.abs = {}; S.specials = {}; showLogin(); } });
   const { data } = await S.sb.auth.getSession();
   if (data && data.session) { S.user = data.session.user; await boot(); } else showLogin();
 }
