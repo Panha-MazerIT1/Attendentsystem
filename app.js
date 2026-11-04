@@ -335,7 +335,7 @@ function dayList() {
     const p = it.filter(x => x.v === 1).length, u = it.length - p;
     return `<div class="absitem"><b>${esc(st.name)}</b> <span class="muted">— ${kh(it.length)} ម៉ោង${p ? ` · មានច្បាប់ ${kh(p)}` : ''}${u ? ` · អត់ច្បាប់ ${kh(u)}` : ''}</span><div>${it.map(x => `<span class="pill ${x.v === 1 ? 'perm' : 'unperm'}">${SESS_S[x.s.sess]} ${kh(x.s.i + 1)} · ${esc(x.s.subject)}</span>`).join('')}</div></div>`;
   }).join('');
-  return `<div class="daybar">${days}</div><p class="muted" style="margin:0 0 8px">${DAYS[S.day]} ${fmtLong(addDays(w.start_date, S.day))} — អវត្តមាន ${kh(items.length)} នាក់</p>${html || '<div class="card"><p class="muted">គ្មានអ្នកអវត្តមានទេ 🎉</p></div>'}`;
+  return `<div class="daybar">${days}</div><p class="muted" style="margin:0 0 8px">${DAYS[S.day]} ${fmtLong(addDays(w.start_date, S.day))} — អវត្តមាន ${kh(items.length)} នាក់</p>${html || '<div class="card"><p class="muted">គ្មានអ្នកអវត្តមានទេ </p></div>'}`;
 }
 function weekTable() {
   const w = S.week, t = weekTotals(w); let P = 0, U = 0;
@@ -642,7 +642,7 @@ function onFile(file) {
       const rows = parseStudents(XLSX.read(rd.result, { type: 'array' }));
       if (!rows.length) return toast('រកមិនឃើញបញ្ជីសិស្ស (ត្រូវមានជួរ "ល.រ" និង "ឈ្មោះ")', 'err');
       const f = rows.filter(r => r.sex === 'ស្រី').length;
-      const d = dialog(`<h2>នាំចូលសិស្ស ${kh(rows.length)} នាក់</h2><p class="muted" style="margin:0">ស្រី ${kh(f)} នាក់ · ${S.students.length ? `⚠️ មានសិស្ស ${kh(S.students.length)} នាក់រួចហើយ (នឹងបន្ថែមបន្ទាប់ ប្រយ័ត្នស្ទួន)` : 'បញ្ជីទទេ'}</p>
+      const d = dialog(`<h2>នាំចូលសិស្ស ${kh(rows.length)} នាក់</h2><p class="muted" style="margin:0">ស្រី ${kh(f)} នាក់ · ${S.students.length ? ` មានសិស្ស ${kh(S.students.length)} នាក់រួចហើយ (នឹងបន្ថែមបន្ទាប់ ប្រយ័ត្នស្ទួន)` : 'បញ្ជីទទេ'}</p>
         <div class="prev"><table class="t"><tbody>${rows.map((r, n) => `<tr><td>${kh(n + 1)}</td><td class="l">${esc(r.name)}</td><td>${esc(r.sex)}</td></tr>`).join('')}</tbody></table></div>
         <div class="foot">${closeBtn}<button class="btn primary" data-act="doImport">នាំចូល</button></div>`);
       d._rows = rows;
