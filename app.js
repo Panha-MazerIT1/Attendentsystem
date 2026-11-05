@@ -98,13 +98,13 @@ async function loadCore() {
     q(S.sb.from('students').select('*').order('seq')),
     q(S.sb.from('weeks').select('*').order('start_date'))
   ]);
-  if (st.length) S.settings = Object.assign(clone(DEFAULT_SETTINGS), st[0].data || {});
-  else if (!isViewer()) await q(S.sb.from('settings').insert({ data: S.settings }));
+  if (st.length) { S.settings = Object.assign(clone(DEFAULT_SETTINGS), st[0].data || {}); S.settingsOwner = st[0].user_id; }
+  else if (!isViewer()) { const r = await q(S.sb.from('settings').insert({ data: S.settings }).select()); S.settingsOwner = r[0].user_id; }
   S.students = students;
   S.weeks = weeks;
 }
 async function saveSettings() {
-  await q(S.sb.from('settings').update({ data: S.settings, updated_at: new Date().toISOString() }).eq('user_id', S.user.id));
+  await q(S.sb.from('settings').update({ data: S.settings, updated_at: new Date().toISOString() }).eq('user_id', S.settingsOwner || S.user.id));
 }
 async function fetchAbs(weekId) {
   if (S.abs[weekId]) return S.abs[weekId];
@@ -135,7 +135,7 @@ async function fetchSpecials(weekId) {
 async function applySpChanges(changes) {
   const w = S.week, m = await fetchSpecials(w.id);
   const old = changes.map(c => m.get(spKey(c.sid, c.day, c.type)));
-  changes.forEach(c => { const k = spKey(c.sid, c.day, c.type); c.status == null ? m.delete(k) : m.set(k, c.status); });
+  changes.forEach(c => { const k = spKey(c.sid, c.day, c.type); rtMark(k); c.status == null ? m.delete(k) : m.set(k, c.status); });
   renderView();
   busy(1);
   try {
@@ -180,7 +180,7 @@ const errText = e => (e && (e.message || e.error_description)) || String(e);
 async function applyChanges(changes) {
   const w = S.week, m = await fetchAbs(w.id);
   const old = changes.map(c => m.get(key(c.sid, c.day, c.sess, c.i)));
-  changes.forEach(c => { const k = key(c.sid, c.day, c.sess, c.i); c.status == null ? m.delete(k) : m.set(k, c.status); });
+  changes.forEach(c => { const k = key(c.sid, c.day, c.sess, c.i); rtMark(k); c.status == null ? m.delete(k) : m.set(k, c.status); });
   renderView();
   busy(1);
   try {
@@ -335,7 +335,7 @@ function dayList() {
     const p = it.filter(x => x.v === 1).length, u = it.length - p;
     return `<div class="absitem"><b>${esc(st.name)}</b> <span class="muted">— ${kh(it.length)} ម៉ោង${p ? ` · មានច្បាប់ ${kh(p)}` : ''}${u ? ` · អត់ច្បាប់ ${kh(u)}` : ''}</span><div>${it.map(x => `<span class="pill ${x.v === 1 ? 'perm' : 'unperm'}">${SESS_S[x.s.sess]} ${kh(x.s.i + 1)} · ${esc(x.s.subject)}</span>`).join('')}</div></div>`;
   }).join('');
-  return `<div class="daybar">${days}</div><p class="muted" style="margin:0 0 8px">${DAYS[S.day]} ${fmtLong(addDays(w.start_date, S.day))} — អវត្តមាន ${kh(items.length)} នាក់</p>${html || '<div class="card"><p class="muted">គ្មានអ្នកអវត្តមានទេ </p></div>'}`;
+  return `<div class="daybar">${days}</div><p class="muted" style="margin:0 0 8px">${DAYS[S.day]} ${fmtLong(addDays(w.start_date, S.day))} — អវត្តមាន ${kh(items.length)} នាក់</p>${html || '<div class="card"><p class="muted">គ្មានអ្នកអវត្តមានទេ 🎉</p></div>'}`;
 }
 function weekTable() {
   const w = S.week, t = weekTotals(w); let P = 0, U = 0;
@@ -429,7 +429,7 @@ function pickWeek(w) {
 }
 
 const ACTS = {
-  tab: el => { S.tab = el.dataset.v; renderView(); window.scrollTo(0, 0); },
+  tab: el => { S.tab = el.dataset.v; if (rtNeedShell) { rtNeedShell = false; renderShell(); } else renderView(); window.scrollTo(0, 0); },
   day: el => { S.day = +el.dataset.v; firstPeriod(); renderView(); },
   per: el => { S.per = { sess: el.dataset.sess, i: +el.dataset.i }; renderView(); },
   rep: el => { S.rep = el.dataset.v; renderView(); },
@@ -642,7 +642,7 @@ function onFile(file) {
       const rows = parseStudents(XLSX.read(rd.result, { type: 'array' }));
       if (!rows.length) return toast('រកមិនឃើញបញ្ជីសិស្ស (ត្រូវមានជួរ "ល.រ" និង "ឈ្មោះ")', 'err');
       const f = rows.filter(r => r.sex === 'ស្រី').length;
-      const d = dialog(`<h2>នាំចូលសិស្ស ${kh(rows.length)} នាក់</h2><p class="muted" style="margin:0">ស្រី ${kh(f)} នាក់ · ${S.students.length ? ` មានសិស្ស ${kh(S.students.length)} នាក់រួចហើយ (នឹងបន្ថែមបន្ទាប់ ប្រយ័ត្នស្ទួន)` : 'បញ្ជីទទេ'}</p>
+      const d = dialog(`<h2>នាំចូលសិស្ស ${kh(rows.length)} នាក់</h2><p class="muted" style="margin:0">ស្រី ${kh(f)} នាក់ · ${S.students.length ? `⚠️ មានសិស្ស ${kh(S.students.length)} នាក់រួចហើយ (នឹងបន្ថែមបន្ទាប់ ប្រយ័ត្នស្ទួន)` : 'បញ្ជីទទេ'}</p>
         <div class="prev"><table class="t"><tbody>${rows.map((r, n) => `<tr><td>${kh(n + 1)}</td><td class="l">${esc(r.name)}</td><td>${esc(r.sex)}</td></tr>`).join('')}</tbody></table></div>
         <div class="foot">${closeBtn}<button class="btn primary" data-act="doImport">នាំចូល</button></div>`);
       d._rows = rows;
@@ -815,6 +815,77 @@ document.addEventListener('submit', async e => {
   S.user = data.user; await boot();
 });
 
+/* ---------- Realtime: ធ្វើបច្ចុប្បន្នភាពភ្លាមៗពេលមានទិន្នន័យថ្មីពីអ្នកដទៃ ---------- */
+const RT_TABLES = ['settings', 'students', 'weeks', 'absences', 'special_absences'];
+let rtChannel = null, rtTimer = null, rtSeen = false, rtNeedShell = false;
+const rtTouch = new Map();
+const rtMark = k => rtTouch.set(k, Date.now());               // ការកែរបស់ខ្លួនឯង → មិនត្រូវ echo ត្រឡប់មកជាន់វិញ
+const rtOwn = k => Date.now() - (rtTouch.get(k) || 0) < 2500;
+
+function rtSchedule(shell) {
+  rtNeedShell = rtNeedShell || !!shell;
+  clearTimeout(rtTimer);
+  rtTimer = setTimeout(rtFlush, 250);
+}
+function rtFlush() {
+  if (!S.user || !$('#view')) return;
+  if (document.querySelector('dialog[open]')) { rtTimer = setTimeout(rtFlush, 1500); return; }   // កុំរំខានពេលបើកផ្ទាំងកែ
+  if (S.tab === 'settings' || S.tab === 'timetable') return;                                      // កុំជាន់អ្វីដែលកំពុងវាយ
+  if (rtNeedShell) { rtNeedShell = false; renderShell(); } else renderView();
+}
+function rtHandle(table, p) {
+  const ev = p.eventType, n = p.new || {}, o = p.old || {}, r = ev === 'DELETE' ? o : n;
+  if (table === 'absences') {
+    const m = S.abs[r.week_id]; if (!m) return;
+    const k = key(r.student_id, r.day, r.session, r.period); if (rtOwn(k)) return;
+    ev === 'DELETE' ? m.delete(k) : m.set(k, n.status);
+    if (S.tab === 'record' || S.tab === 'reports') rtSchedule(false);
+  } else if (table === 'special_absences') {
+    const m = S.specials[r.week_id]; if (!m) return;
+    const k = spKey(r.student_id, r.day, r.type); if (rtOwn(k)) return;
+    ev === 'DELETE' ? m.delete(k) : m.set(k, n.status);
+    if (S.tab === 'specials') rtSchedule(false);
+  } else if (table === 'students') {
+    if (ev === 'DELETE') S.students = S.students.filter(x => x.id !== o.id);
+    else { const i = S.students.findIndex(x => x.id === n.id); if (i < 0) S.students.push(n); else Object.assign(S.students[i], n); S.students.sort((a, b) => a.seq - b.seq); }
+    rtSchedule(true);
+  } else if (table === 'weeks') {
+    if (ev === 'DELETE') {
+      S.weeks = S.weeks.filter(x => x.id !== o.id); delete S.abs[o.id]; delete S.specials[o.id];
+      if (S.week && S.week.id === o.id) {
+        const last = S.weeks.slice().sort((a, b) => a.start_date.localeCompare(b.start_date)).pop();
+        S.week = null; if (last) pickWeek(last);
+      }
+    } else {
+      const i = S.weeks.findIndex(x => x.id === n.id);
+      if (i < 0) S.weeks.push(n); else Object.assign(S.weeks[i], n);
+    }
+    rtSchedule(true);
+  } else if (table === 'settings') {
+    if (ev !== 'DELETE' && n.data) { S.settings = Object.assign(clone(DEFAULT_SETTINGS), n.data); rtSchedule(true); }
+  }
+}
+async function rtResync() {
+  if (!S.user || S.pending > 0) return;
+  try {
+    const id = S.week && S.week.id;
+    await loadCore(); S.abs = {}; S.specials = {};
+    const w = S.weeks.find(x => x.id === id);
+    if (w) S.week = w;
+    else { S.week = null; const last = S.weeks.slice().sort((a, b) => a.start_date.localeCompare(b.start_date)).pop(); if (last) pickWeek(last); }
+    rtSchedule(true);
+  } catch (e) { /* ព្យាយាមម្តងទៀតពេលក្រោយ */ }
+}
+function startRealtime() {
+  stopRealtime();
+  let ch = S.sb.channel('att-live');
+  RT_TABLES.forEach(t => { ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, p => rtHandle(t, p)); });
+  ch.subscribe(status => { if (status === 'SUBSCRIBED') { if (rtSeen) rtResync(); rtSeen = true; } });
+  rtChannel = ch;
+}
+function stopRealtime() { if (rtChannel && S.sb) S.sb.removeChannel(rtChannel); rtChannel = null; rtSeen = false; }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) rtResync(); });   // ត្រឡប់មកកម្មវិធីវិញ → ទាញទិន្នន័យថ្មី
+
 async function boot() {
   app.innerHTML = '<p class="boot">កំពុងផ្ទុក…</p>';
   try {
@@ -825,6 +896,7 @@ async function boot() {
     const w = sorted.find(x => x.start_date === cur) || sorted[sorted.length - 1] || null;
     S.week = null; if (w) pickWeek(w);
     renderShell();
+    startRealtime();
   } catch (e) { app.innerHTML = `<p class="boot" style="color:#b42318">ផ្ទុកទិន្នន័យមិនបាន៖ ${esc(errText(e))}<br><small>ពិនិត្យថាបាន Run schema.sql រួចហើយ</small></p>`; }
 }
 
@@ -834,7 +906,7 @@ async function init() {
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   try { url = new URL(url).origin; } catch (e) { /* ទុកដដែល */ }
   S.sb = window.supabase.createClient(url, String(CFG.SUPABASE_ANON_KEY).trim());
-  S.sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; S.abs = {}; S.specials = {}; showLogin(); } });
+  S.sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { stopRealtime(); S.user = null; S.abs = {}; S.specials = {}; showLogin(); } });
   const { data } = await S.sb.auth.getSession();
   if (data && data.session) { S.user = data.session.user; await boot(); } else showLogin();
 }
