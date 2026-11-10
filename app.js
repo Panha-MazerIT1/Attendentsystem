@@ -386,10 +386,10 @@ function viewScores() {
   if (!sh) return head + '<div class="card"><p class="muted">មិនទាន់មានមុខវិជ្ជាសម្រាប់ខែនេះទេ — ចុច "+ មុខវិជ្ជា" ដើម្បីចាប់ផ្តើមបញ្ចូលពិន្ទុ។</p></div>';
   const mx = maxOf(sh), rows = sheetRows(sh), tmax = maxSum(sh);
   const th = COMPS.map(([c, l]) => `<th>${l}<br><small class="muted">/${kh(Number(mx[c]))}</small></th>`).join('');
-  const body = rows.map((t, n) => `<tr><td>${kh(n + 1)}</td><td class="l">${esc(t.st.name)}</td>${COMPS.map(([c, l]) => `<td><input class="scin" type="number" inputmode="decimal" step="any" min="0" max="${Number(mx[c])}" data-sid="${t.st.id}" data-c="${c}" value="${t.v[c] == null ? '' : t.v[c]}" ${Number(mx[c]) > 0 ? '' : 'disabled'} style="width:58px;padding:6px;text-align:center" aria-label="${esc(l)} ${esc(t.st.name)}"></td>`).join('')}<td><b id="t-${t.st.id}">${sn(t.total)}</b></td><td id="p-${t.st.id}">${sn(t.pct)}</td><td id="r-${t.st.id}">${t.rank ? kh(t.rank) : '—'}</td></tr>`).join('');
+  const body = rows.map((t, n) => `<tr><td>${kh(n + 1)}</td><td class="l">${esc(t.st.name)}</td>${COMPS.map(([c, l]) => `<td><input class="scin" type="number" inputmode="decimal" step="any" min="0" max="${Number(mx[c])}" data-sid="${t.st.id}" data-c="${c}" value="${t.v[c] == null ? '' : t.v[c]}" ${Number(mx[c]) > 0 ? '' : 'disabled'} style="width:58px;padding:6px;text-align:center" aria-label="${esc(l)} ${esc(t.st.name)}"></td>`).join('')}<td><b id="t-${t.st.id}">${sn(t.total)}</b></td><td id="r-${t.st.id}">${t.rank ? kh(t.rank) : '—'}</td></tr>`).join('');
   return `${head}<div class="row" style="margin-bottom:8px"><b style="font-family:var(--font-kh)">${esc(sh.subject)}</b><span class="grow"></span><button class="btn small" data-act="editSheet" data-id="${sh.id}">កែមុខវិជ្ជា / ពិន្ទុពេញ</button></div>
-  <div class="tw"><table class="t"><thead><tr><th>ល.រ</th><th class="l">ឈ្មោះ</th>${th}<th>ពិន្ទុសរុប<br><small class="muted">/${kh(r1(tmax))}</small></th><th>%</th><th>ចំណាត់ថ្នាក់</th></tr></thead><tbody>${body || '<tr><td colspan="11" class="muted">មិនទាន់មានសិស្ស</td></tr>'}</tbody></table></div>
-  <p class="muted" style="margin:8px 0 0;font-size:.85rem">ពិន្ទុសរុប = សប្ដាហ៍១-៤ + វត្តមាន + កិច្ចការ + ប្រឡង · % = សរុប ÷ ពិន្ទុពេញសរុប × ១០០ · ចំណាត់ថ្នាក់តាម % · Enter = ចុះទៅសិស្សបន្ទាប់ · ${kh(activeStudents().length)} នាក់</p>`;
+  <div class="tw"><table class="t"><thead><tr><th>ល.រ</th><th class="l">ឈ្មោះ</th>${th}<th>ពិន្ទុសរុប<br><small class="muted">/${kh(r1(tmax))}</small></th><th>ចំណាត់ថ្នាក់</th></tr></thead><tbody>${body || '<tr><td colspan="10" class="muted">មិនទាន់មានសិស្ស</td></tr>'}</tbody></table></div>
+  <p class="muted" style="margin:8px 0 0;font-size:.85rem">ពិន្ទុសរុប = សប្ដាហ៍១-៤ + វត្តមាន + កិច្ចការ + ប្រឡង · ចំណាត់ថ្នាក់តាមពិន្ទុសរុប · Enter = ចុះទៅសិស្សបន្ទាប់ · ${kh(activeStudents().length)} នាក់</p>`;
 }
 function sheetDialog(e) {
   const mx = e ? maxOf(e) : DEF_MAX;
@@ -442,7 +442,7 @@ function scoreSummary(kind, month) {
   const rows = activeStudents().map((st, n) => {
     const per = {};
     subjects.forEach(sub => {
-      const v = sheets.filter(x => x.subject === sub).map(sh => bySheet.get(sh.id)[n].pct).filter(x => x !== null);
+      const v = sheets.filter(x => x.subject === sub).map(sh => bySheet.get(sh.id)[n].total).filter(x => x !== null);
       per[sub] = v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
     });
     const got = subjects.filter(sub => per[sub] !== null), total = got.reduce((a, sub) => a + per[sub], 0);
@@ -459,7 +459,7 @@ function viewScoreReport() {
   if (!sum.sheets.length) return ctl + '<div class="card"><p class="muted">មិនទាន់មានពិន្ទុសម្រាប់ជម្រើសនេះទេ។</p></div>';
   const th = sum.subjects.map(x => `<th>${esc(x)}</th>`).join('');
   const rows = sum.rows.map((r, n) => `<tr><td>${kh(n + 1)}</td><td class="l">${esc(r.st.name)}</td>${sum.subjects.map(x => `<td>${sn(r.per[x])}</td>`).join('')}<td><b>${sn(r.total)}</b></td><td><b>${sn(r.avg)}</b></td><td>${r.rank ? kh(r.rank) : '—'}</td></tr>`).join('');
-  return `${ctl}<p class="muted" style="margin:0 0 8px;font-size:.85rem">មុខវិជ្ជានីមួយៗជាភាគរយ (ពិន្ទុសរុបមុខវិជ្ជា ÷ ពិន្ទុពេញ × ១០០) · ការនាំចេញ Excel មានតារាងលម្អិតរបស់មុខវិជ្ជានីមួយៗ (សប្តាហ៍១-៤ វត្តមាន កិច្ចការ ប្រឡង)</p>
+  return `${ctl}<p class="muted" style="margin:0 0 8px;font-size:.85rem">ពិន្ទុសរុបរបស់មុខវិជ្ជានីមួយៗ · មធ្យមភាគ = សរុប ÷ ចំនួនមុខវិជ្ជា · ការនាំចេញ Excel មានតារាងលម្អិតរបស់មុខវិជ្ជានីមួយៗ (សប្តាហ៍១-៤ វត្តមាន កិច្ចការ ប្រឡង)</p>
   <div class="tw"><table class="t"><thead><tr><th>ល.រ</th><th class="l">ឈ្មោះ</th>${th}<th>សរុប</th><th>មធ្យមភាគ</th><th>ចំណាត់ថ្នាក់</th></tr></thead><tbody>${rows}</tbody></table></div>
   <div class="row" style="margin-top:12px"><button class="btn primary grow" data-act="exportScores">នាំចេញ Excel</button></div>`;
 }
@@ -479,7 +479,7 @@ function buildScoreWorkbook(sum) {
   top(aoa, 'តារាងពិន្ទុ' + (S.rs.kind === 'all' ? '' : ' · ' + KIND_L[S.rs.kind]) + monthTxt);
   aoa.push(['ល.រ', 'ឈ្មោះ', 'ភេទ', ...sum.subjects, 'ពិន្ទុសរុប', 'មធ្យមភាគ', 'ចំណាត់ថ្នាក់'].map(h => c(h, H)));
   sum.rows.forEach((r, i) => aoa.push([c(i + 1), c(r.st.name), c(r.st.sex || ''), ...sum.subjects.map(x => c(r.per[x] == null ? '' : r1(r.per[x]))), c(r.total == null ? '' : r1(r.total)), c(r.avg == null ? '' : r1(r.avg)), c(r.rank || '')]));
-  aoa.push([]); aoa.push([c('មុខវិជ្ជានីមួយៗជាភាគរយ (ពិន្ទុសរុប ÷ ពិន្ទុពេញ × ១០០)', { font: { italic: true } })]);
+  aoa.push([]); aoa.push([c('ពិន្ទុសរុបរបស់មុខវិជ្ជានីមួយៗ · មធ្យមភាគ = សរុប ÷ ចំនួនមុខវិជ្ជា', { font: { italic: true } })]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 8 }, ...sum.subjects.map(() => ({ wch: 16 })), { wch: 12 }, { wch: 12 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, ws, 'សរុប'); used.add('សរុប');
@@ -487,11 +487,11 @@ function buildScoreWorkbook(sum) {
   sum.sheets.forEach(sh => {
     const mx = maxOf(sh), tmax = maxSum(sh), a = [];
     top(a, `បញ្ជីសម្រង់ពិន្ទុមុខវិជ្ជា ${sh.subject} សម្រាប់ខែ ${MONTHS[+sh.month.slice(5, 7) - 1]} ${sh.month.slice(0, 4)}`);
-    a.push([...['ល.រ', 'ឈ្មោះ', 'ភេទ', ...COMPS.map(([, l]) => l)].map(h => c(h, H)), c('ពិន្ទុសរុប', H), c('%', H), c('ចំណាត់ថ្នាក់', H)]);
+    a.push([...['ល.រ', 'ឈ្មោះ', 'ភេទ', ...COMPS.map(([, l]) => l)].map(h => c(h, H)), c('ពិន្ទុសរុប', H), c('ចំណាត់ថ្នាក់', H)]);
     a.push([c(''), c(''), c('ពិន្ទុពេញ', { font: { italic: true } }), ...COMPS.map(([k]) => c(Number(mx[k]), { font: { italic: true } })), c(r1(tmax), { font: { italic: true } })]);
-    sum.bySheet.get(sh.id).forEach((r, i) => a.push([c(i + 1), c(r.st.name), c(r.st.sex || ''), ...COMPS.map(([k]) => c(r.v[k] == null ? '' : r.v[k])), c(r.total == null ? '' : r1(r.total)), c(r.pct == null ? '' : r1(r.pct)), c(r.rank || '')]));
+    sum.bySheet.get(sh.id).forEach((r, i) => a.push([c(i + 1), c(r.st.name), c(r.st.sex || ''), ...COMPS.map(([k]) => c(r.v[k] == null ? '' : r.v[k])), c(r.total == null ? '' : r1(r.total)), c(r.rank || '')]));
     const w2 = XLSX.utils.aoa_to_sheet(a);
-    w2['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, ...COMPS.map(() => ({ wch: 12 })), { wch: 12 }, { wch: 8 }, { wch: 12 }];
+    w2['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, ...COMPS.map(() => ({ wch: 12 })), { wch: 12 }, { wch: 12 }];
     let nm = (sh.subject + (S.rs.kind === 'all' ? ' ' + (sh.kind === 'term' ? 'ត្រីមាស' : '') + sh.month.slice(5) : '')).replace(/[\\\/?*\[\]:]/g, '').trim().slice(0, 28) || 'សន្លឹក';
     let u = nm, n = 2; while (used.has(u)) u = nm.slice(0, 26) + n++;
     used.add(u); XLSX.utils.book_append_sheet(wb, w2, u);
