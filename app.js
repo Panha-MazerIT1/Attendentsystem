@@ -63,7 +63,8 @@ const DEFAULT_SETTINGS = {
 
 const S = {
   sb: null, user: null, role: 'owner', settings: clone(DEFAULT_SETTINGS),
-  students: [], weeks: [], week: null, abs: {}, specials: {},
+  students: [], weeks: [], week: null, abs: {}, specials: {}, sheets: [], gs: null,
+  sc: { kind: 'month', month: '', sheetId: null }, rs: { kind: 'all', month: '' },
   tab: 'record', day: 0, per: { sess: 'am', i: 0 }, spType: null,
   rep: 'day', month: '', ttDay: 0, ttDraft: null, tok: 0, pending: 0
 };
@@ -102,6 +103,8 @@ async function loadCore() {
   else if (!isViewer()) { const r = await q(S.sb.from('settings').insert({ data: S.settings }).select()); S.settingsOwner = r[0].user_id; }
   S.students = students;
   S.weeks = weeks;
+  try { S.sheets = await q(S.sb.from('grade_sheets').select('*').order('created_at')); } catch (e) { S.sheets = []; }   // មិនទាន់ Run schema_scores.sql → មិនឲ្យខូចទាំងមូល
+  S.gs = null;
 }
 async function saveSettings() {
   await q(S.sb.from('settings').update({ data: S.settings, updated_at: new Date().toISOString() }).eq('user_id', S.settingsOwner || S.user.id));
@@ -207,9 +210,10 @@ const ICONS = {
   students: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>',
   timetable: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  scores: '<path d="M9 3h6l1 2h3v16H5V5h3z"/><path d="M9 12h6M9 16h4"/>',
   specials: '<path d="M12 2.5l2.9 5.88 6.5.94-4.7 4.58 1.1 6.47L12 17.3l-5.8 3.07 1.1-6.47-4.7-4.58 6.5-.94z"/>'
 };
-const TABS_OWNER = [['record', 'កត់វត្តមាន'], ['specials', 'ម៉ោងពិសេស'], ['reports', 'របាយការណ៍'], ['students', 'សិស្ស'], ['timetable', 'កាលវិភាគ'], ['settings', 'ការកំណត់']];
+const TABS_OWNER = [['record', 'កត់វត្តមាន'], ['specials', 'ម៉ោងពិសេស'], ['scores', 'ពិន្ទុ'], ['reports', 'របាយការណ៍'], ['students', 'សិស្ស'], ['timetable', 'កាលវិភាគ'], ['settings', 'ការកំណត់']];
 const TABS_VIEWER = [['reports', 'របាយការណ៍']];
 const TABS = () => isViewer() ? TABS_VIEWER : TABS_OWNER;
 
@@ -238,7 +242,7 @@ function renderShell() {
   </header>
   <div id="saving"></div>
   <main id="view"></main>
-  <nav class="tabs" style="grid-template-columns:repeat(${tabs.length},1fr)" aria-label="ម៉ឺនុយ">${tabs.map(([k, l]) => `<button data-act="tab" data-v="${k}" class="${S.tab === k ? 'on' : ''}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${l}</button>`).join('')}</nav>
+  <nav class="tabs" style="grid-template-columns:repeat(${tabs.length},minmax(66px,1fr))" aria-label="ម៉ឺនុយ">${tabs.map(([k, l]) => `<button data-act="tab" data-v="${k}" class="${S.tab === k ? 'on' : ''}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${l}</button>`).join('')}</nav>
   <div id="toast" role="status" aria-live="polite"></div>`;
   renderView();
 }
@@ -248,7 +252,7 @@ async function renderView() {
   const v = $('#view'); if (!v) return;
   $$('.tabs button').forEach(b => { const on = b.dataset.v === S.tab; b.classList.toggle('on', on); on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'); });
   const tok = ++S.tok;
-  if (!S.week && ['record', 'specials', 'reports', 'timetable'].includes(S.tab)) { v.innerHTML = viewNoWeek(); return; }
+  if (!S.week && (['record', 'specials', 'timetable'].includes(S.tab) || (S.tab === 'reports' && S.rep !== 'score'))) { v.innerHTML = viewNoWeek(); return; }
   switch (S.tab) {
     case 'record':
       if (!S.abs[S.week.id]) { v.innerHTML = '<p class="pad muted">កំពុងផ្ទុក…</p>'; await fetchAbs(S.week.id).catch(e => toast(errText(e), 'err')); if (tok !== S.tok) return; }
@@ -256,7 +260,14 @@ async function renderView() {
     case 'specials':
       if (!S.specials[S.week.id]) { v.innerHTML = '<p class="pad muted">កំពុងផ្ទុក…</p>'; await fetchSpecials(S.week.id).catch(e => toast(errText(e), 'err')); if (tok !== S.tok) return; }
       v.innerHTML = viewSpecials(); break;
+    case 'scores':
+      if (!S.gs) { v.innerHTML = '<p class="pad muted">កំពុងផ្ទុក…</p>'; await fetchGS().catch(e => toast(errText(e), 'err')); if (tok !== S.tok) return; }
+      v.innerHTML = S.gs ? viewScores() : '<div class="card"><p class="muted">ផ្ទុកពិន្ទុមិនបាន — ពិនិត្យថាបាន Run schema_scores.sql រួចហើយ។</p></div>'; break;
     case 'reports': {
+      if (S.rep === 'score') {
+        if (!S.gs) { v.innerHTML = viewReports('<p class="pad muted">កំពុងផ្ទុក…</p>'); await fetchGS().catch(e => toast(errText(e), 'err')); if (tok !== S.tok) return; }
+        v.innerHTML = viewReports(S.gs ? viewScoreReport() : '<div class="card"><p class="muted">ផ្ទុកពិន្ទុមិនបាន — ពិនិត្យថាបាន Run schema_scores.sql រួចហើយ។</p></div>'); break;
+      }
       if (S.rep === 'month') {
         const ws = monthWeeks();
         if (ws.some(w => !S.abs[w.id])) { v.innerHTML = viewReports('<p class="pad muted">កំពុងផ្ទុក…</p>'); await ensureAbs(ws).catch(e => toast(errText(e), 'err')); if (tok !== S.tok) return; }
@@ -323,9 +334,171 @@ function viewSpecials() {
   }
   return `<div class="daybar">${days}</div><div class="chips">${chips}</div>${body}`;
 }
+
+/* ---------- ពិន្ទុតាមមុខវិជ្ជា ----------
+   មុខវិជ្ជាមួយ = តារាងមួយ (grade_sheets) ដូច Excel៖ សប្តាហ៍ទី១-៤ · វត្តមាន · កិច្ចការ · ប្រឡង → សរុប */
+const KIND_L = { month: 'ប្រចាំខែ', term: 'ត្រីមាស/ឆមាស' };
+const COMPS = [['w1', 'សប្ដាហ៍ទី១'], ['w2', 'សប្ដាហ៍ទី២'], ['w3', 'សប្ដាហ៍ទី៣'], ['w4', 'សប្ដាហ៍ទី៤'], ['att', 'ពិន្ទុវត្តមាន'], ['hw', 'កិច្ចការ'], ['exam', 'ពិន្ទុប្រឡង']];
+const DEF_MAX = { w1: 5, w2: 5, w3: 5, w4: 5, att: 10, hw: 20, exam: 50 };   // ផលបូក = ១០០ (កែបានក្នុងមុខវិជ្ជានីមួយៗ)
+const r1 = n => Math.round(n * 10) / 10;
+const sn = n => (n == null ? '—' : kh(String(r1(n))));
+const maxOf = sh => Object.assign({}, DEF_MAX, sh.maxes || {});
+const maxSum = sh => COMPS.reduce((a, [c]) => a + Number(maxOf(sh)[c] || 0), 0);
+async function fetchGS() {
+  if (S.gs) return S.gs;
+  const m = new Map();
+  for (let from = 0; ; from += 1000) {
+    const rows = await q(S.sb.from('grade_scores').select('sheet_id,student_id,w1,w2,w3,w4,att,hw,exam').order('sheet_id').order('student_id').range(from, from + 999));
+    rows.forEach(r => m.set(r.sheet_id + '|' + r.student_id, normScore(r)));
+    if (rows.length < 1000) break;
+  }
+  S.gs = m;
+  return m;
+}
+function normScore(r) { const o = {}; COMPS.forEach(([c]) => { o[c] = r[c] == null ? null : Number(r[c]); }); return o; }
+const sheetsOf = (kind, month) => S.sheets.filter(x => (kind === 'all' || x.kind === kind) && (!month || x.month === month))
+  .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+const curSheets = () => sheetsOf(S.sc.kind, S.sc.month);
+function curSheet() { const l = curSheets(); return l.find(x => x.id === S.sc.sheetId) || l[0] || null; }
+function rankRows(rows) {
+  const ranked = rows.filter(r => r.pct !== null).sort((a, b) => Math.round(b.pct * 100) - Math.round(a.pct * 100));
+  ranked.forEach((r, i) => { r.rank = i > 0 && Math.round(r.pct * 100) === Math.round(ranked[i - 1].pct * 100) ? ranked[i - 1].rank : i + 1; });
+}
+function sheetRows(sh) {
+  const mx = maxSum(sh);
+  const rows = activeStudents().map(st => {
+    const v = S.gs.get(sh.id + '|' + st.id) || {}, got = COMPS.filter(([c]) => v[c] != null);
+    const total = got.length ? got.reduce((a, [c]) => a + v[c], 0) : null;
+    return { st, v, total, pct: total === null || !mx ? null : total / mx * 100, rank: 0 };
+  });
+  rankRows(rows);
+  return rows;
+}
+function viewScores() {
+  if (!S.sc.month) S.sc.month = todayISO().slice(0, 7);
+  const b = (k, l) => `<button class="${S.sc.kind === k ? 'on' : ''}" data-act="scKind" data-v="${k}">${l}</button>`;
+  const list = curSheets(), sh = curSheet(); S.sc.sheetId = sh ? sh.id : null;
+  const head = `<div class="tabs2">${b('month', 'ប្រចាំខែ')}${b('term', 'ត្រីមាស/ឆមាស')}</div>
+  <div class="card"><div class="row"><div class="grow"><label class="f" for="scMonth" style="margin-top:0">ខែ</label><input id="scMonth" type="month" value="${S.sc.month}"></div><button class="btn primary" data-act="newSheet" style="align-self:flex-end">+ មុខវិជ្ជា</button></div></div>
+  <div class="chips">${list.map(x => `<button class="chip ${sh && x.id === sh.id ? 'on' : ''}" data-act="scSheet" data-id="${x.id}"><b>${esc(x.subject)}</b><span>/${kh(r1(maxSum(x)))}</span></button>`).join('')}</div>`;
+  if (!sh) return head + '<div class="card"><p class="muted">មិនទាន់មានមុខវិជ្ជាសម្រាប់ខែនេះទេ — ចុច "+ មុខវិជ្ជា" ដើម្បីចាប់ផ្តើមបញ្ចូលពិន្ទុ។</p></div>';
+  const mx = maxOf(sh), rows = sheetRows(sh), tmax = maxSum(sh);
+  const th = COMPS.map(([c, l]) => `<th>${l}<br><small class="muted">/${kh(Number(mx[c]))}</small></th>`).join('');
+  const body = rows.map((t, n) => `<tr><td>${kh(n + 1)}</td><td class="l">${esc(t.st.name)}</td>${COMPS.map(([c, l]) => `<td><input class="scin" type="number" inputmode="decimal" step="any" min="0" max="${Number(mx[c])}" data-sid="${t.st.id}" data-c="${c}" value="${t.v[c] == null ? '' : t.v[c]}" ${Number(mx[c]) > 0 ? '' : 'disabled'} style="width:58px;padding:6px;text-align:center" aria-label="${esc(l)} ${esc(t.st.name)}"></td>`).join('')}<td><b id="t-${t.st.id}">${sn(t.total)}</b></td><td id="p-${t.st.id}">${sn(t.pct)}</td><td id="r-${t.st.id}">${t.rank ? kh(t.rank) : '—'}</td></tr>`).join('');
+  return `${head}<div class="row" style="margin-bottom:8px"><b style="font-family:var(--font-kh)">${esc(sh.subject)}</b><span class="grow"></span><button class="btn small" data-act="editSheet" data-id="${sh.id}">កែមុខវិជ្ជា / ពិន្ទុពេញ</button></div>
+  <div class="tw"><table class="t"><thead><tr><th>ល.រ</th><th class="l">ឈ្មោះ</th>${th}<th>ពិន្ទុសរុប<br><small class="muted">/${kh(r1(tmax))}</small></th><th>%</th><th>ចំណាត់ថ្នាក់</th></tr></thead><tbody>${body || '<tr><td colspan="11" class="muted">មិនទាន់មានសិស្ស</td></tr>'}</tbody></table></div>
+  <p class="muted" style="margin:8px 0 0;font-size:.85rem">ពិន្ទុសរុប = សប្ដាហ៍១-៤ + វត្តមាន + កិច្ចការ + ប្រឡង · % = សរុប ÷ ពិន្ទុពេញសរុប × ១០០ · ចំណាត់ថ្នាក់តាម % · Enter = ចុះទៅសិស្សបន្ទាប់ · ${kh(activeStudents().length)} នាក់</p>`;
+}
+function sheetDialog(e) {
+  const mx = e ? maxOf(e) : DEF_MAX;
+  const d = dialog(`<h2>${e ? 'កែមុខវិជ្ជា' : 'បន្ថែមមុខវិជ្ជា'}</h2>
+    <label class="f" for="x-sub">មុខវិជ្ជា (ជ្រើសពីកាលវិភាគ ឬវាយខ្លួនឯង)</label><input id="x-sub" type="text" list="x-subs" value="${esc(e ? e.subject : '')}" autocomplete="off"><datalist id="x-subs">${subjectList().map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+    <p class="muted" style="margin:10px 0 0;font-size:.85rem">ពិន្ទុពេញនៃសមាសធាតុនីមួយៗ (ដាក់ ០ បើមិនប្រើ)</p>
+    <div class="row">${COMPS.map(([c, l]) => `<div style="flex:1 1 120px"><label class="f" for="x-m-${c}">${l}</label><input id="x-m-${c}" type="number" inputmode="decimal" step="any" min="0" value="${Number(mx[c])}"></div>`).join('')}</div>
+    <div class="foot">${e ? `<button class="btn danger" data-act="delSheet" data-id="${e.id}">លុប</button>` : ''}<span class="grow"></span>${closeBtn}<button class="btn primary" data-act="saveSheet" data-id="${e ? e.id : ''}">រក្សាទុក</button></div>`);
+  setTimeout(() => $('#x-sub', d).focus(), 50);
+}
+function subjectList() {
+  const set = new Set();
+  const add = tt => { for (const d in (tt || {})) for (const sess of ['am', 'pm']) ((tt[d] && tt[d][sess]) || []).forEach(x => x && set.add(x)); };
+  add(S.settings.template); S.weeks.forEach(w => add(w.timetable)); S.sheets.forEach(x => set.add(x.subject));
+  return [...set];
+}
+async function saveScore(inp) {
+  const sh = curSheet(); if (!sh || isViewer()) return;
+  const sid = inp.dataset.sid, c = inp.dataset.c, k = sh.id + '|' + sid, raw = inp.value.trim();
+  const cur = S.gs.get(k) || {}, old = cur[c] == null ? null : cur[c], mx = Number(maxOf(sh)[c]);
+  let v = null;
+  if (raw !== '') {
+    v = parseFloat(raw);
+    if (!(v >= 0) || v > mx) { toast(`ពិន្ទុត្រូវនៅចន្លោះ ០ ដល់ ${kh(mx)}`, 'err'); inp.value = old == null ? '' : old; return; }
+  }
+  if (v === old) return;
+  const had = S.gs.has(k), entry = Object.assign(cur, { [c]: v });
+  COMPS.forEach(([x]) => { if (entry[x] === undefined) entry[x] = null; });
+  S.gs.set(k, entry);
+  refreshGridTotals();
+  rtMark('gs|' + k); busy(1);
+  try { await q(S.sb.from('grade_scores').upsert({ sheet_id: sh.id, student_id: sid, [c]: v }, { onConflict: 'sheet_id,student_id' })); }
+  catch (err) {
+    entry[c] = old; if (!had) S.gs.delete(k);
+    inp.value = old == null ? '' : old; refreshGridTotals();
+    toast('រក្សាទុកមិនបាន៖ ' + errText(err), 'err');
+  } finally { busy(-1); }
+}
+function refreshGridTotals() {
+  const sh = curSheet(); if (!sh) return;
+  sheetRows(sh).forEach(t => {
+    const a = $('#t-' + t.st.id), p = $('#p-' + t.st.id), r = $('#r-' + t.st.id);
+    if (a) a.textContent = sn(t.total); if (p) p.textContent = sn(t.pct); if (r) r.textContent = t.rank ? kh(t.rank) : '—';
+  });
+}
+/* របាយការណ៍ពិន្ទុ៖ មុខវិជ្ជានីមួយៗជា % (សរុប ÷ ពិន្ទុពេញ) · រួម សរុប/មធ្យមភាគ/ចំណាត់ថ្នាក់ */
+function scoreSummary(kind, month) {
+  const sheets = sheetsOf(kind, month), subjects = [...new Set(sheets.map(x => x.subject))];
+  const bySheet = new Map(sheets.map(sh => [sh.id, sheetRows(sh)]));
+  const rows = activeStudents().map((st, n) => {
+    const per = {};
+    subjects.forEach(sub => {
+      const v = sheets.filter(x => x.subject === sub).map(sh => bySheet.get(sh.id)[n].pct).filter(x => x !== null);
+      per[sub] = v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+    });
+    const got = subjects.filter(sub => per[sub] !== null), total = got.reduce((a, sub) => a + per[sub], 0);
+    return { st, per, total: got.length ? total : null, pct: got.length ? total / got.length : null, rank: 0 };
+  });
+  rankRows(rows);
+  rows.forEach(r => { r.avg = r.pct; });
+  return { sheets, subjects, rows, bySheet };
+}
+function viewScoreReport() {
+  const sum = scoreSummary(S.rs.kind, S.rs.month);
+  const kinds = [['all', 'ទាំងអស់'], ...Object.entries(KIND_L)].map(([k, l]) => `<option value="${k}" ${S.rs.kind === k ? 'selected' : ''}>${l}</option>`).join('');
+  const ctl = `<div class="card"><div class="row"><div class="grow"><label class="f" for="rsKind" style="margin-top:0">ប្រភេទ</label><select id="rsKind">${kinds}</select></div><div class="grow"><label class="f" for="rsMonth" style="margin-top:0">ខែ</label><input id="rsMonth" type="month" value="${S.rs.month}"></div></div><button class="btn small" style="margin-top:8px" data-act="rsMonthAll">បង្ហាញគ្រប់ខែ</button></div>`;
+  if (!sum.sheets.length) return ctl + '<div class="card"><p class="muted">មិនទាន់មានពិន្ទុសម្រាប់ជម្រើសនេះទេ។</p></div>';
+  const th = sum.subjects.map(x => `<th>${esc(x)}</th>`).join('');
+  const rows = sum.rows.map((r, n) => `<tr><td>${kh(n + 1)}</td><td class="l">${esc(r.st.name)}</td>${sum.subjects.map(x => `<td>${sn(r.per[x])}</td>`).join('')}<td><b>${sn(r.total)}</b></td><td><b>${sn(r.avg)}</b></td><td>${r.rank ? kh(r.rank) : '—'}</td></tr>`).join('');
+  return `${ctl}<p class="muted" style="margin:0 0 8px;font-size:.85rem">មុខវិជ្ជានីមួយៗជាភាគរយ (ពិន្ទុសរុបមុខវិជ្ជា ÷ ពិន្ទុពេញ × ១០០) · ការនាំចេញ Excel មានតារាងលម្អិតរបស់មុខវិជ្ជានីមួយៗ (សប្តាហ៍១-៤ វត្តមាន កិច្ចការ ប្រឡង)</p>
+  <div class="tw"><table class="t"><thead><tr><th>ល.រ</th><th class="l">ឈ្មោះ</th>${th}<th>សរុប</th><th>មធ្យមភាគ</th><th>ចំណាត់ថ្នាក់</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="row" style="margin-top:12px"><button class="btn primary grow" data-act="exportScores">នាំចេញ Excel</button></div>`;
+}
+function buildScoreWorkbook(sum) {
+  const s = S.settings, H = { font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, fill: { fgColor: { rgb: 'EEF3FB' } } };
+  const c = (v, st) => ({ v, t: typeof v === 'number' ? 'n' : 's', s: st });
+  const monthTxt = S.rs.month ? ' · ខែ' + MONTHS[+S.rs.month.slice(5, 7) - 1] + ' ' + S.rs.month.slice(0, 4) : '';
+  const top = (aoa, title) => {
+    (s.header_lines || []).forEach(l => aoa.push([c(l, { font: { bold: true } })]));
+    aoa.push([c(title, { font: { bold: true, sz: 14 } })]);
+    if (s.class_title) aoa.push([c(s.class_title)]);
+    aoa.push([]);
+  };
+  const wb = XLSX.utils.book_new(), used = new Set();
+  // សន្លឹកសរុប
+  const aoa = [];
+  top(aoa, 'តារាងពិន្ទុ' + (S.rs.kind === 'all' ? '' : ' · ' + KIND_L[S.rs.kind]) + monthTxt);
+  aoa.push(['ល.រ', 'ឈ្មោះ', 'ភេទ', ...sum.subjects, 'ពិន្ទុសរុប', 'មធ្យមភាគ', 'ចំណាត់ថ្នាក់'].map(h => c(h, H)));
+  sum.rows.forEach((r, i) => aoa.push([c(i + 1), c(r.st.name), c(r.st.sex || ''), ...sum.subjects.map(x => c(r.per[x] == null ? '' : r1(r.per[x]))), c(r.total == null ? '' : r1(r.total)), c(r.avg == null ? '' : r1(r.avg)), c(r.rank || '')]));
+  aoa.push([]); aoa.push([c('មុខវិជ្ជានីមួយៗជាភាគរយ (ពិន្ទុសរុប ÷ ពិន្ទុពេញ × ១០០)', { font: { italic: true } })]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 8 }, ...sum.subjects.map(() => ({ wch: 16 })), { wch: 12 }, { wch: 12 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'សរុប'); used.add('សរុប');
+  // មួយសន្លឹកក្នុងមួយមុខវិជ្ជា (ដូច Excel របស់អ្នក)
+  sum.sheets.forEach(sh => {
+    const mx = maxOf(sh), tmax = maxSum(sh), a = [];
+    top(a, `បញ្ជីសម្រង់ពិន្ទុមុខវិជ្ជា ${sh.subject} សម្រាប់ខែ ${MONTHS[+sh.month.slice(5, 7) - 1]} ${sh.month.slice(0, 4)}`);
+    a.push([...['ល.រ', 'ឈ្មោះ', 'ភេទ', ...COMPS.map(([, l]) => l)].map(h => c(h, H)), c('ពិន្ទុសរុប', H), c('%', H), c('ចំណាត់ថ្នាក់', H)]);
+    a.push([c(''), c(''), c('ពិន្ទុពេញ', { font: { italic: true } }), ...COMPS.map(([k]) => c(Number(mx[k]), { font: { italic: true } })), c(r1(tmax), { font: { italic: true } })]);
+    sum.bySheet.get(sh.id).forEach((r, i) => a.push([c(i + 1), c(r.st.name), c(r.st.sex || ''), ...COMPS.map(([k]) => c(r.v[k] == null ? '' : r.v[k])), c(r.total == null ? '' : r1(r.total)), c(r.pct == null ? '' : r1(r.pct)), c(r.rank || '')]));
+    const w2 = XLSX.utils.aoa_to_sheet(a);
+    w2['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, ...COMPS.map(() => ({ wch: 12 })), { wch: 12 }, { wch: 8 }, { wch: 12 }];
+    let nm = (sh.subject + (S.rs.kind === 'all' ? ' ' + (sh.kind === 'term' ? 'ត្រីមាស' : '') + sh.month.slice(5) : '')).replace(/[\\\/?*\[\]:]/g, '').trim().slice(0, 28) || 'សន្លឹក';
+    let u = nm, n = 2; while (used.has(u)) u = nm.slice(0, 26) + n++;
+    used.add(u); XLSX.utils.book_append_sheet(wb, w2, u);
+  });
+  return wb;
+}
 function viewReports(inner) {
   const b = (k, l) => `<button class="${S.rep === k ? 'on' : ''}" data-act="rep" data-v="${k}">${l}</button>`;
-  return `<div class="tabs2">${b('day', 'អ្នកឈប់ថ្ងៃ')}${b('week', 'សរុបសប្ដាហ៍')}${b('month', 'សរុបខែ')}</div>${inner}`;
+  return `<div class="tabs2">${b('day', 'អ្នកឈប់ថ្ងៃ')}${b('week', 'សរុបសប្ដាហ៍')}${b('month', 'សរុបខែ')}${b('score', 'ពិន្ទុ')}</div>${inner}`;
 }
 function dayList() {
   const w = S.week, m = S.abs[w.id] || new Map(), slots = slotsOfDay(w.timetable, S.day).filter(s => s.subject);
@@ -482,6 +655,52 @@ const ACTS = {
     d.close(); if (ch.length) applyChanges(ch); else toast('គ្មានអ្វីត្រូវប្តូរ');
   },
 
+  /* ពិន្ទុ */
+  scKind: el => { S.sc.kind = el.dataset.v; S.sc.sheetId = null; renderView(); },
+  scSheet: el => { S.sc.sheetId = el.dataset.id; renderView(); },
+  rsMonthAll: () => { S.rs.month = ''; renderView(); },
+  newSheet: () => sheetDialog(null),
+  editSheet: el => sheetDialog(S.sheets.find(x => x.id === el.dataset.id)),
+  saveSheet: async el => {
+    const d = el.closest('dialog'), id = el.dataset.id;
+    const subject = $('#x-sub', d).value.trim(), maxes = {};
+    if (!subject) return toast('សូមបញ្ចូលមុខវិជ្ជា', 'err');
+    for (const [c, l] of COMPS) {
+      const v = parseFloat($('#x-m-' + c, d).value);
+      if (!(v >= 0)) return toast(`ពិន្ទុពេញ "${l}" មិនត្រឹមត្រូវ`, 'err');
+      maxes[c] = v;
+    }
+    if (!COMPS.some(([c]) => maxes[c] > 0)) return toast('ត្រូវមានពិន្ទុពេញយ៉ាងតិចមួយសមាសធាតុ', 'err');
+    if (curSheets().some(x => x.subject === subject && x.id !== id)) return toast('មុខវិជ្ជានេះមានរួចហើយក្នុងខែនេះ', 'err');
+    try {
+      if (id) {
+        const bad = [...S.gs].find(([k, v]) => k.startsWith(id + '|') && COMPS.some(([c]) => v[c] != null && v[c] > maxes[c]));
+        if (bad) return toast('មានពិន្ទុខ្លះធំជាងពិន្ទុពេញថ្មី — សូមកែពិន្ទុជាមុន', 'err');
+        await q(S.sb.from('grade_sheets').update({ subject, maxes }).eq('id', id)); Object.assign(S.sheets.find(x => x.id === id), { subject, maxes });
+      } else {
+        const row = await q(S.sb.from('grade_sheets').insert({ kind: S.sc.kind, month: S.sc.month, subject, maxes }).select().single());
+        S.sheets.push(row); S.sc.sheetId = row.id;
+      }
+      d.close(); renderView(); toast('បានរក្សាទុក');
+    } catch (e) { toast('រក្សាទុកមិនបាន៖ ' + errText(e), 'err'); }
+  },
+  delSheet: async el => {
+    const e = S.sheets.find(x => x.id === el.dataset.id);
+    if (!confirm(`លុបមុខវិជ្ជា "${e.subject}" រួមទាំងពិន្ទុទាំងអស់របស់មុខវិជ្ជានេះ?`)) return;
+    try {
+      await q(S.sb.from('grade_sheets').delete().eq('id', e.id));
+      S.sheets = S.sheets.filter(x => x.id !== e.id); [...S.gs.keys()].forEach(k => { if (k.startsWith(e.id + '|')) S.gs.delete(k); });
+      S.sc.sheetId = null; el.closest('dialog').close(); renderView(); toast('បានលុប');
+    } catch (err) { toast('លុបមិនបាន៖ ' + errText(err), 'err'); }
+  },
+  exportScores: () => {
+    try {
+      const sum = scoreSummary(S.rs.kind, S.rs.month);
+      if (!sum.sheets.length) return toast('មិនមានពិន្ទុសម្រាប់នាំចេញទេ', 'err');
+      download(buildScoreWorkbook(sum), `scores_${S.rs.kind}_${S.rs.month || 'all'}.xlsx`);
+    } catch (e) { toast('នាំចេញមិនបាន៖ ' + errText(e), 'err'); }
+  },
+
   /* ម៉ោងពិសេស (កត់ម្នាក់ៗ ដូចកត់វត្តមានធម្មតា) */
   spType: el => { S.spType = el.dataset.k; renderView(); },
   spCycle: el => {
@@ -552,7 +771,7 @@ const ACTS = {
     if (!confirm(`លុប "${st.name}" រួមទាំងវត្តមានទាំងអស់របស់សិស្សនេះ? (បើគ្រាន់តែឈប់រៀន សូមប្រើ "លាក់" ជំនួស)`)) return;
     try {
       await q(S.sb.from('students').delete().eq('id', st.id));
-      S.students = S.students.filter(s => s.id !== st.id); S.abs = {}; el.closest('dialog').close(); renderView(); toast('បានលុប');
+      S.students = S.students.filter(s => s.id !== st.id); S.abs = {}; S.specials = {}; S.gs = null; el.closest('dialog').close(); renderView(); toast('បានលុប');
     } catch (e) { toast('លុបមិនបាន៖ ' + errText(e), 'err'); }
   },
   renumber: async () => {
@@ -789,7 +1008,7 @@ function download(wb, name) { XLSX.writeFile(wb, name); }
 /* ---------- 6. ចាប់ផ្តើម ---------- */
 // អ្នកមើល (viewer) អាចប្រើបានតែសកម្មភាពអានទាំងនេះ · សកម្មភាពផ្សេងទៀត (កែ/បន្ថែម/លុប) ត្រូវបានទប់ស្កាត់
 // នៅត្រង់នេះជាចំណុចតែមួយ បន្ថែមលើ RLS ខាង Supabase ដែលជាស្រទាប់ការពារពិតប្រាកដ។
-const VIEWER_SAFE_ACTS = new Set(['tab', 'day', 'rep', 'closeDlg', 'exportWeek', 'exportMonth', 'logout']);
+const VIEWER_SAFE_ACTS = new Set(['tab', 'day', 'rep', 'closeDlg', 'exportWeek', 'exportMonth', 'exportScores', 'rsMonthAll', 'logout']);
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const act = el.dataset.act;
@@ -800,7 +1019,17 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'weekSel') { const w = S.weeks.find(x => x.id === t.value); if (w) { pickWeek(w); renderView(); } }
   else if (t.id === 'monthSel') { S.month = t.value; renderView(); }
+  else if (t.id === 'rsKind') { S.rs.kind = t.value; renderView(); }
+  else if (t.id === 'rsMonth') { S.rs.month = t.value; renderView(); }
+  else if (t.id === 'scMonth' && !isViewer()) { S.sc.month = t.value; S.sc.sheetId = null; renderView(); }
+  else if (t.classList && t.classList.contains('scin') && !isViewer()) saveScore(t);
   else if (t.id === 'fileIn' && t.files[0]) { if (isViewer()) { t.value = ''; return; } onFile(t.files[0]); t.value = ''; }
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !e.target.classList || !e.target.classList.contains('scin')) return;
+  e.preventDefault();
+  const colIn = $$('.scin:not([disabled])').filter(x => x.dataset.c === e.target.dataset.c), i = colIn.indexOf(e.target);
+  if (colIn[i + 1]) colIn[i + 1].focus(); else e.target.blur();
 });
 document.addEventListener('submit', async e => {
   if (e.target.id !== 'loginForm') return; e.preventDefault();
@@ -816,7 +1045,7 @@ document.addEventListener('submit', async e => {
 });
 
 /* ---------- Realtime: ធ្វើបច្ចុប្បន្នភាពភ្លាមៗពេលមានទិន្នន័យថ្មីពីអ្នកដទៃ ---------- */
-const RT_TABLES = ['settings', 'students', 'weeks', 'absences', 'special_absences'];
+const RT_TABLES = ['settings', 'students', 'weeks', 'absences', 'special_absences', 'grade_sheets', 'grade_scores'];
 let rtChannel = null, rtTimer = null, rtSeen = false, rtNeedShell = false;
 const rtTouch = new Map();
 const rtMark = k => rtTouch.set(k, Date.now());               // ការកែរបស់ខ្លួនឯង → មិនត្រូវ echo ត្រឡប់មកជាន់វិញ
@@ -830,6 +1059,7 @@ function rtSchedule(shell) {
 function rtFlush() {
   if (!S.user || !$('#view')) return;
   if (document.querySelector('dialog[open]')) { rtTimer = setTimeout(rtFlush, 1500); return; }   // កុំរំខានពេលបើកផ្ទាំងកែ
+  if (document.activeElement && document.activeElement.classList.contains('scin')) { rtTimer = setTimeout(rtFlush, 1500); return; }   // កំពុងវាយពិន្ទុ
   if (S.tab === 'settings' || S.tab === 'timetable') return;                                      // កុំជាន់អ្វីដែលកំពុងវាយ
   if (rtNeedShell) { rtNeedShell = false; renderShell(); } else renderView();
 }
@@ -845,6 +1075,15 @@ function rtHandle(table, p) {
     const k = spKey(r.student_id, r.day, r.type); if (rtOwn(k)) return;
     ev === 'DELETE' ? m.delete(k) : m.set(k, n.status);
     if (S.tab === 'specials') rtSchedule(false);
+  } else if (table === 'grade_sheets') {
+    if (ev === 'DELETE') { S.sheets = S.sheets.filter(x => x.id !== o.id); if (S.gs) [...S.gs.keys()].forEach(k => { if (k.startsWith(o.id + '|')) S.gs.delete(k); }); }
+    else { const i = S.sheets.findIndex(x => x.id === n.id); if (i < 0) S.sheets.push(n); else Object.assign(S.sheets[i], n); }
+    if (S.tab === 'scores' || S.tab === 'reports') rtSchedule(false);
+  } else if (table === 'grade_scores') {
+    if (!S.gs) return;
+    const k = r.sheet_id + '|' + r.student_id; if (rtOwn('gs|' + k)) return;
+    if (ev === 'DELETE') S.gs.delete(k); else S.gs.set(k, normScore(n));
+    if (S.tab === 'scores' || S.tab === 'reports') rtSchedule(false);
   } else if (table === 'students') {
     if (ev === 'DELETE') S.students = S.students.filter(x => x.id !== o.id);
     else { const i = S.students.findIndex(x => x.id === n.id); if (i < 0) S.students.push(n); else Object.assign(S.students[i], n); S.students.sort((a, b) => a.seq - b.seq); }
@@ -869,7 +1108,7 @@ async function rtResync() {
   if (!S.user || S.pending > 0) return;
   try {
     const id = S.week && S.week.id;
-    await loadCore(); S.abs = {}; S.specials = {};
+    await loadCore(); S.abs = {}; S.specials = {}; S.gs = null;
     const w = S.weeks.find(x => x.id === id);
     if (w) S.week = w;
     else { S.week = null; const last = S.weeks.slice().sort((a, b) => a.start_date.localeCompare(b.start_date)).pop(); if (last) pickWeek(last); }
@@ -906,7 +1145,7 @@ async function init() {
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   try { url = new URL(url).origin; } catch (e) { /* ទុកដដែល */ }
   S.sb = window.supabase.createClient(url, String(CFG.SUPABASE_ANON_KEY).trim());
-  S.sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { stopRealtime(); S.user = null; S.abs = {}; S.specials = {}; showLogin(); } });
+  S.sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { stopRealtime(); S.user = null; S.abs = {}; S.specials = {}; S.gs = null; S.sheets = []; showLogin(); } });
   const { data } = await S.sb.auth.getSession();
   if (data && data.session) { S.user = data.session.user; await boot(); } else showLogin();
 }
