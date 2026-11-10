@@ -6,6 +6,7 @@
 'use strict';
 
 const CFG = window.APP_CONFIG || {};
+const DEFAULT_LOGO = 'https://pjhxmwglnvtdhipogetm.supabase.co/storage/v1/object/sign/Logo/%20.png?token=eyJraWQiOiIzYjY4NjI1ZS1iMWFlLTQ5MTYtODc1Ny1kMGJjZmY0ZmNjZTkiLCJhbGciOiJIUzUxMiJ9.eyJ1cmwiOiJMb2dvLyAucG5nIiwic2NvcGUiOiJkb3dubG9hZCIsImlhdCI6MTc5NDI4MTEzNywiZXhwIjoxODI1ODE3MTM3fQ.83LY1dUBjetXVbwKs54SeENswLYOhankTEVYvNN8udPxafjsm2MTeaWMQsCKIAnFTo1cVX7P80-TByckkM-aPA';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const app = document.getElementById('app');
@@ -234,6 +235,7 @@ function renderShell() {
   const tabs = TABS();
   app.innerHTML = `
   <header class="top">
+    <img src="${esc(CFG.LOGO_URL || DEFAULT_LOGO)}" alt="" onerror="this.remove()" style="height:42px;width:42px;object-fit:contain;border-radius:8px;background:#fff;padding:2px;flex:none">
     <div class="brand"><b>វត្តមាន</b><small>${esc(S.settings.short_title || '')}${isViewer() ? ' · អ្នកមើល' : ''}</small></div>
     <div class="weekpick">
       <select id="weekSel" aria-label="ជ្រើសរើសសប្ដាហ៍">${weeks.map(w => `<option value="${w.id}" ${S.week && w.id === S.week.id ? 'selected' : ''}>${weekLabel(w)}</option>`).join('') || '<option>—</option>'}</select>
